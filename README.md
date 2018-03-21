@@ -35,6 +35,6 @@ $self->plugin('GetSentry', {
 
 # Defaults
 
-`tags_context` - nothing is captured by default
-`user_context` - this plugin is trying to capture the `user id` and the `ip address`
-`request_context` - this plugin is trying to capture the `url`, `request method` and the `headers`
+- `tags_context` - nothing is captured by default
+- `user_context` - this plugin is trying to capture the `user id` and the `ip address`
+- `request_context` - this plugin is trying to capture the `url`, `request method` and the `headers`
