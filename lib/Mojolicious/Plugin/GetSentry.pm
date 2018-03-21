@@ -137,12 +137,14 @@ sub add_user_context {
 
     return $self->handle_custom('user_context', $c) if ($self->defined_custom('user_context'));
 
-    $self->raven->add_context(
-        $self->raven->user_context(
-            id          => $c->user->id,
-            ip_address  => $c->tx->remote_address,
-        )
-    );
+    if ($c->can('user')) {
+        $self->raven->add_context(
+            $self->raven->user_context(
+                id          => $c->user->id,
+                ip_address  => $c->tx->remote_address,
+            )
+        );
+    }
 }
 
 sub add_request_context {
@@ -150,16 +152,20 @@ sub add_request_context {
 
     return $self->handle_custom('request_context', $c) if ($self->defined_custom('request_context'));
 
-    my $request_context = {
-        method  => $c->req->method,
-        headers => $c->req->headers->to_hash,
-    };
+    if ($c->can('req')) {
+        my $request_context = {
+            method  => $c->req->method,
+            headers => $c->req->headers->to_hash,
+        };
 
-    $self->raven->add_context(
-        $self->raven->request_context($c->url_for->to_abs, %$request_context)
-    );
+        $self->raven->add_context(
+            $self->raven->request_context($c->url_for->to_abs, %$request_context)
+        );
 
-    return $request_context;
+        return $request_context;
+    }
+
+    return {};
 }
 
 sub defined_custom {
