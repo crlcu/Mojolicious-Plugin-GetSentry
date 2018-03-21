@@ -9,7 +9,6 @@ use Sentry::Raven;
 
 has [qw(
     sentry_dsn timeout
-    stacktrace_context exception_context user_context request_context
 )];
 
 has 'log_levels' => sub { ['error', 'fatal'] };
@@ -85,6 +84,8 @@ sub capture_request {
     $self->add_stacktrace_context($ex);
     $self->add_exception_context($ex);
     $self->add_user_context($c);
+
+    $self->handle_custom('tags_context', $c) if ($self->defined_custom('tags_context'));
     
     my $request_context = $self->add_request_context($c);
 
@@ -116,8 +117,6 @@ sub capture_message {
 sub add_stacktrace_context {
     my ($self, $exception) = @_;
 
-    return $self->stacktrace_context($self->raven, $exception) if ($self->stacktrace_context);
-
     my $stacktrace = Devel::StackTrace::Extract::extract_stack_trace($exception);
 
     $self->raven->add_context(
@@ -128,8 +127,6 @@ sub add_stacktrace_context {
 sub add_exception_context {
     my ($self, $exception) = @_;
 
-    return $self->exception_context($self->raven, $exception) if ($self->exception_context);
-
     $self->raven->add_context(
         $self->raven->exception_context($exception->message, type => ref($exception))
     );
@@ -138,7 +135,7 @@ sub add_exception_context {
 sub add_user_context {
     my ($self, $c) = @_;
 
-    return $self->user_context($self->raven, $c) if ($self->user_context);
+    return $self->handle_custom('user_context', $c) if ($self->defined_custom('user_context'));
 
     $self->raven->add_context(
         $self->raven->user_context(
@@ -151,7 +148,7 @@ sub add_user_context {
 sub add_request_context {
     my ($self, $c) = @_;
 
-    return $self->request_context($self->raven, $c) if ($self->request_context);
+    return $self->handle_custom('request_context', $c) if ($self->defined_custom('request_context'));
 
     my $request_context = {
         method  => $c->req->method,
@@ -163,6 +160,28 @@ sub add_request_context {
     );
 
     return $request_context;
+}
+
+sub defined_custom {
+    my ($self, $method, $param) = @_;
+
+    my $sub = $self->{ $method };
+
+    if (ref($sub) eq 'CODE') {
+        return 1;
+    }
+
+    return 0;
+}
+
+sub handle_custom {
+    my ($self, $method, $param) = @_;
+
+    my $sub = $self->{ $method };
+
+    if (ref($sub) eq 'CODE') {
+        return $sub->($self->raven, $param);
+    }
 }
 
 1;
@@ -231,20 +250,6 @@ See also L<Sentry::Raven->processors|https://metacpan.org/pod/Sentry::Raven#$rav
 L<Mojolicious::Plugin::GetSentry> inherits all methods from L<Mojolicious::Plugin> and implements the
 following new ones.
 
-=head2 stacktrace_context
-
-    $app->sentry->stacktrace_context($raven, $exception)
-
-    Build the stacktrace context for current exception.
-    See also L<Sentry::Raven->stacktrace_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Estacktrace_context(-$frames-)>
-
-=head2 exception_context
-
-    $app->sentry->exception_context($raven, $exception)
-
-    Build the exception context for current exception.
-    See also L<Sentry::Raven->exception_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Eexception_context(-$value,-%25exception_context-)>
-
 =head2 user_context
 
     $app->sentry->user_context($raven, $controller)
@@ -258,6 +263,13 @@ following new ones.
 
     Build the request context from current controller.
     See also L<Sentry::Raven->request_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Erequest_context(-$url,-%25request_context-)>
+
+=head2 tags_context
+    
+    $app->sentry->tags_context($raven, $controller)
+
+    Add some tags to the context.
+    See also L<Sentry::Raven->3Emerge_tags|https://metacpan.org/pod/Sentry::Raven#$raven-%3Emerge_tags(-%25tags-)>
 
 =head1 SOURCE REPOSITORY
 
