@@ -1,7 +1,7 @@
 package Mojolicious::Plugin::GetSentry;
 use Mojo::Base 'Mojolicious::Plugin';
 
-our $VERSION = '1.1';
+our $VERSION = '1.1.1';
 
 use Data::Dump 'dump';
 use Devel::StackTrace::Extract;
