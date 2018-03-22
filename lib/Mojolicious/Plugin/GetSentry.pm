@@ -1,7 +1,7 @@
 package Mojolicious::Plugin::GetSentry;
 use Mojo::Base 'Mojolicious::Plugin';
 
-our $VERSION = '1.1.3';
+our $VERSION = '1.1.4';
 
 use Data::Dump 'dump';
 use Devel::StackTrace::Extract;
@@ -303,7 +303,7 @@ Handle reporting to Sentry error.
 =cut
 
 sub on_error {
-    my ($self, $method) = (shift, shift);
+    my ($self, $message) = (shift, shift);
 
     die "failed to submit event to sentry service:\n" . dump($self->raven->_construct_message_event($message, @_));
 }
@@ -401,7 +401,7 @@ version 1.0
         },
 
         on_error => sub {
-            my ($sentry, $method) = (shift, shift);
+            my ($self, $message) = (shift, shift);
 
             die "failed to submit event to sentry service:\n" . dump($sentry->raven->_construct_message_event($message, @_));
         }
