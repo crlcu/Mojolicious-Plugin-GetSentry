@@ -400,7 +400,7 @@ version 1.0
             return 1 if ($expection->message =~ /Do not log this error/);
         },
 
-        on_error {
+        on_error => sub {
             my ($sentry, $method) = (shift, shift);
 
             die "failed to submit event to sentry service:\n" . dump($sentry->raven->_construct_message_event($message, @_));
