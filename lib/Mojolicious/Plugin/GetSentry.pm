@@ -1,8 +1,9 @@
 package Mojolicious::Plugin::GetSentry;
 use Mojo::Base 'Mojolicious::Plugin';
 
-our $VERSION = '1.0';
+our $VERSION = '1.1';
 
+use Data::Dump 'dump';
 use Devel::StackTrace::Extract;
 use Mojo::IOLoop;
 use Sentry::Raven;
@@ -12,8 +13,6 @@ has [qw(
 )];
 
 has 'log_levels' => sub { ['error', 'fatal'] };
-
-has 'pending' => sub { {} };
 has 'processors' => sub { [] };
 
 has 'raven' => sub {
@@ -26,95 +25,128 @@ has 'raven' => sub {
     );
 };
 
+has 'handlers' => sub {
+    my $self = shift;
+
+    return {
+        capture_request     => sub { $self->capture_request(@_) },
+        capture_message     => sub { $self->capture_message(@_) },
+        stacktrace_context  => sub { $self->stacktrace_context(@_) },
+        exception_context   => sub { $self->exception_context(@_) },
+        user_context        => sub { $self->user_context(@_) },
+        request_context     => sub { $self->request_context(@_) },
+        tags_context        => sub { $self->tags_context(@_) },
+        on_error            => sub { $self->on_error(@_) },
+    };
+};
+
+has 'custom_handlers' => sub { {} };
+has 'pending' => sub { {} };
+
 sub register {
     my ($self, $app, $config) = (@_);
     
+    my $handlers = {};
+
+    foreach my $name (keys(%{ $self->handlers })) {
+        $handlers->{ $name } = delete($config->{ $name });
+    }
+
+    # Set custom handlers
+    $self->custom_handlers($handlers);
+
     $config ||= {};
-    $self->{$_} = $config->{$_} for keys %$config;
+    $self->{ $_ } = $config->{ $_ } for keys %$config;
     
-    $self->_hook_after_dispatch($app);
-    $self->_hook_on_message($app);
+    $self->hook_after_dispatch($app);
+    $self->hook_on_message($app);
 }
 
-sub _hook_after_dispatch {
+sub hook_after_dispatch {
     my $self = shift;
     my $app = shift;
 
     $app->hook(after_dispatch => sub {
-        my $c = shift;
+        my $controller = shift;
 
-        if (my $ex = $c->stash('exception')) {
+        if (my $exception = $controller->stash('exception')) {
             # Mark this exception as handled. We don't delete it from $pending
             # because if the same exception is logged several times within a
             # 2-second period, we want the logger to ignore it.
-            $self->pending->{$ex} = 0 if defined $self->pending->{$ex};
-
-            $self->capture_request($ex, $c);
+            $self->pending->{ $exception } = 0 if defined $self->pending->{ $exception };
+            
+            $self->handle('capture_request', $exception, $controller);
         }
     });
 }
 
-sub _hook_on_message {
+sub hook_on_message {
     my $self = shift;
     my $app = shift;
 
     $app->log->on(message => sub {
-        my ($log, $level, $ex) = @_;
+        my ($log, $level, $exception) = @_;
 
         if( grep { $level eq $_ } @{ $self->log_levels } ) {
-            $ex = Mojo::Exception->new($ex) unless ref $ex;
+            $exception = Mojo::Exception->new($exception) unless ref $exception;
 
             # This exception is already pending
-            return if defined $self->pending->{$ex};
+            return if defined $self->pending->{ $exception };
        
-            $self->pending->{$ex} = 1;
+            $self->pending->{ $exception } = 1;
 
             # Wait 2 seconds before we handle it; if the exception happened in
             # a request we want the after_dispatch-hook to handle it instead.
             Mojo::IOLoop->timer(2 => sub {
-                $self->capture_message($ex);
+                $self->handle('capture_message', $exception);
             });
         }
     });
 }
 
-sub capture_request {
-    my ($self, $ex, $c) = @_;
+sub handle {
+    my ($self, $method) = (shift, shift);
 
-    $self->add_stacktrace_context($ex);
-    $self->add_exception_context($ex);
-    $self->add_user_context($c);
-
-    $self->handle_custom('tags_context', $c) if ($self->defined_custom('tags_context'));
+    return $self->custom_handlers->{ $method }->($self, @_)
+        if (defined($self->custom_handlers->{ $method }));
     
-    my $request_context = $self->add_request_context($c);
+    return $self->handlers->{ $method }->(@_);
+}
 
-    my $event_id = $self->raven->capture_request($c->url_for->to_abs, %$request_context, $self->raven->get_context);
+sub capture_request {
+    my ($self, $exception, $controller) = @_;
+
+    $self->handle('stacktrace_context', $exception);
+    $self->handle('exception_context', $exception);
+    $self->handle('user_context', $controller);
+    $self->handle('tags_context', $controller);
+    
+    my $request_context = $self->handle('request_context', $controller);
+
+    my $event_id = $self->raven->capture_request($controller->url_for->to_abs, %$request_context, $self->raven->get_context);
 
     if (!defined($event_id)) {
-        die "failed to submit event to sentry service:\n"
-            . CORE::dump($self->raven->_construct_message_event($ex->message, $self->raven->get_context));
+        $self->handle('on_error', $exception->message, $self->raven->get_context);
     }
 
     return $event_id;
 }
 
 sub capture_message {
-    my ($self, $ex) = @_;
+    my ($self, $exception) = @_;
 
-    $self->add_exception_context($ex);
+    $self->handle('exception_context', $exception);
 
-    my $event_id = $self->raven->capture_message($ex->message, $self->raven->get_context);
+    my $event_id = $self->raven->capture_message($exception->message, $self->raven->get_context);
 
     if (!defined($event_id)) {
-        die "failed to submit event to sentry service:\n"
-            . CORE::dump($self->raven->_construct_message_event($ex->message, $self->raven->get_context));
+        $self->handle('on_error', $exception->message, $self->raven->get_context);
     }
 
     return $event_id;
 }
 
-sub add_stacktrace_context {
+sub stacktrace_context {
     my ($self, $exception) = @_;
 
     my $stacktrace = Devel::StackTrace::Extract::extract_stack_trace($exception);
@@ -124,7 +156,7 @@ sub add_stacktrace_context {
     );
 }
 
-sub add_exception_context {
+sub exception_context {
     my ($self, $exception) = @_;
 
     $self->raven->add_context(
@@ -132,34 +164,30 @@ sub add_exception_context {
     );
 }
 
-sub add_user_context {
-    my ($self, $c) = @_;
+sub user_context {
+    my ($self, $controller) = @_;
 
-    return $self->handle_custom('user_context', $c) if ($self->defined_custom('user_context'));
-
-    if ($c->can('user')) {
+    if (defined($controller->user)) {
         $self->raven->add_context(
             $self->raven->user_context(
-                id          => $c->user->id,
-                ip_address  => $c->tx->remote_address,
+                id          => $controller->user->id,
+                ip_address  => $controller->tx && $controller->tx->remote_address,
             )
         );
     }
 }
 
-sub add_request_context {
-    my ($self, $c) = @_;
+sub request_context {
+    my ($self, $controller) = @_;
 
-    return $self->handle_custom('request_context', $c) if ($self->defined_custom('request_context'));
-
-    if ($c->can('req')) {
+    if (defined($controller->req)) {
         my $request_context = {
-            method  => $c->req->method,
-            headers => $c->req->headers->to_hash,
+            method  => $controller->req->method,
+            headers => $controller->req->headers->to_hash,
         };
 
         $self->raven->add_context(
-            $self->raven->request_context($c->url_for->to_abs, %$request_context)
+            $self->raven->request_context($controller->url_for->to_abs, %$request_context)
         );
 
         return $request_context;
@@ -168,26 +196,18 @@ sub add_request_context {
     return {};
 }
 
-sub defined_custom {
-    my ($self, $method, $param) = @_;
+sub tags_context {
+    my ($self, $c) = @_;
 
-    my $sub = $self->{ $method };
-
-    if (ref($sub) eq 'CODE') {
-        return 1;
-    }
-
-    return 0;
+    $self->raven->merge_tags(
+        getsentry => $VERSION,
+    );
 }
 
-sub handle_custom {
-    my ($self, $method, $param) = @_;
+sub on_error {
+    my ($self, $message) = (shift, shift);
 
-    my $sub = $self->{ $method };
-
-    if (ref($sub) eq 'CODE') {
-        return $sub->($self->raven, $param);
-    }
+    die "failed to submit event to sentry service:\n" . dump($self->raven->_construct_message_event($message, @_));
 }
 
 1;
@@ -235,47 +255,73 @@ L<Mojolicious::Plugin::GetSentry> implements the following attributes.
 
 =head2 sentry_dsn
 
-Sentry DSN url
+    Sentry DSN url
 
 =head2 timeout
 
-Timeout specified in seconds
+    Timeout specified in seconds
 
 =head2 log_levels
 
-Which log levels needs to be sent to Sentry
-e.g.: ['error', 'fatal']
+    Which log levels needs to be sent to Sentry
+    e.g.: ['error', 'fatal']
 
 =head2 processors
 
-A list of processors to filter down Sentry event
-See also L<Sentry::Raven->processors|https://metacpan.org/pod/Sentry::Raven#$raven-%3Eadd_processors(-%5B-Sentry::Raven::Processor::RemoveStackVariables,-...-%5D-)>
+    A list of processors to filter down Sentry event
+    See also L<Sentry::Raven->processors|https://metacpan.org/pod/Sentry::Raven#$raven-%3Eadd_processors(-%5B-Sentry::Raven::Processor::RemoveStackVariables,-...-%5D-)>
+
+=head2 raven
+
+    Sentry::Raven instance
+
+    See also L<Sentry::Raven|https://metacpan.org/pod/Sentry::Raven>
 
 =head1 METHODS
 
 L<Mojolicious::Plugin::GetSentry> inherits all methods from L<Mojolicious::Plugin> and implements the
 following new ones.
 
+=head2 stacktrace_context
+    
+    $app->sentry->stacktrace_context($exception)
+    
+    Build the stacktrace context from current exception.
+    See also L<Sentry::Raven->stacktrace_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Estacktrace_context(-$frames-)>
+
+=head2 exception_context
+    
+    $app->sentry->exception_context($exception)
+    
+    Build the exception context from current exception.
+    See also L<Sentry::Raven->exception_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Eexception_context(-$value,-%25exception_context-)>
+
 =head2 user_context
 
-    $app->sentry->user_context($raven, $controller)
+    $app->sentry->user_context($controller)
     
     Build the user context from current controller.
     See also L<Sentry::Raven->user_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Euser_context(-%25user_context-)>
 
 =head2 request_context
 
-    $app->sentry->request_context($raven, $controller)
+    $app->sentry->request_context($controller)
 
     Build the request context from current controller.
     See also L<Sentry::Raven->request_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Erequest_context(-$url,-%25request_context-)>
 
 =head2 tags_context
     
-    $app->sentry->tags_context($raven, $controller)
+    $app->sentry->tags_context($controller)
 
     Add some tags to the context.
     See also L<Sentry::Raven->3Emerge_tags|https://metacpan.org/pod/Sentry::Raven#$raven-%3Emerge_tags(-%25tags-)>
+
+head2 on_error
+    
+    $app->sentry->on_error($message, %context)
+
+    Handle reporting to Sentry error.
 
 =head1 SOURCE REPOSITORY
 

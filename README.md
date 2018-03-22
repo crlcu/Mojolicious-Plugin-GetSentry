@@ -6,28 +6,29 @@ Sentry client for Mojolicious
 ```perl
 $self->plugin('GetSentry', {
     sentry_dsn => '...',
+    log_levels => ['error', 'fatal'],
     tags_context => sub {
-        my ($raven, $c) = @_;
+        my ($plugin, $controller) = @_;
 
-        $raven->merge_tags(
-            account => '12345',
+        $plugin->merge_tags(
+            account => $controller->current_user->account_id,
         );
     },
     user_context => {
-        my ($raven, $c) = @_;
+        my ($plugin, $controller) = @_;
 
-        $raven->add_context(
-            $raven->user_context(
+        $plugin->add_context(
+            $plugin->user_context(
                 id          => 1,
                 ip_address  => '10.10.10.1',
             )
         );
     },
     request_context => {
-        my ($raven, $c) = @_;
+        my ($plugin, $controller) = @_;
 
-        $raven->add_context(
-            $raven->request_context('https://custom.domain/profile', method => 'GET', headers => { ... });
+        $plugin->raven->add_context(
+            $plugin->raven->request_context('https://custom.domain/profile', method => 'GET', headers => { ... });
         );
     },
 });
