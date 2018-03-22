@@ -10,15 +10,15 @@ $self->plugin('GetSentry', {
     tags_context => sub {
         my ($plugin, $controller) = @_;
 
-        $plugin->merge_tags(
+        $plugin->raven->merge_tags(
             account => $controller->current_user->account_id,
         );
     },
     user_context => {
         my ($plugin, $controller) = @_;
 
-        $plugin->add_context(
-            $plugin->user_context(
+        $plugin->raven->add_context(
+            $plugin->raven->user_context(
                 id          => 1,
                 ip_address  => '10.10.10.1',
             )
