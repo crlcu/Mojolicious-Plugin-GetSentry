@@ -23,6 +23,11 @@ WriteMakefile(
         'Mojo::IOLoop' => 0,
         'Sentry::Raven' => 0,
     },
+    META_MERGE   => {
+        resources => {
+            repository  =>  'https://github.com/crlcu/Mojolicious-Plugin-GetSentry',
+        },
+    },
     dist  => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean => { FILES => 'Mojolicious-Plugin-GetSentry-*' },
 );
