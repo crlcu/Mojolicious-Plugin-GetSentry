@@ -14,7 +14,7 @@ $self->plugin('GetSentry', {
             account => $controller->current_user->account_id,
         );
     },
-    user_context => {
+    user_context => sub {
         my ($plugin, $controller) = @_;
 
         $plugin->raven->add_context(
@@ -24,7 +24,7 @@ $self->plugin('GetSentry', {
             )
         );
     },
-    request_context => {
+    request_context => sub {
         my ($plugin, $controller) = @_;
 
         $plugin->raven->add_context(

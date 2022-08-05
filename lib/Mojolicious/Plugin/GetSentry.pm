@@ -64,7 +64,7 @@ has 'skip' => sub { [] };
 
 sub register {
     my ($self, $app, $config) = (@_);
-    
+
     my $handlers = {};
 
     foreach my $name (keys(%{ $self->handlers })) {
@@ -76,7 +76,7 @@ sub register {
 
     $config ||= {};
     $self->$_($config->{ $_ }) for keys %$config;
-    
+
     $self->hook_after_dispatch($app);
     $self->hook_on_message($app);
 }
@@ -97,7 +97,7 @@ sub hook_after_dispatch {
             # because if the same exception is logged several times within a
             # 2-second period, we want the logger to ignore it.
             $self->pending->{ $exception } = 0 if defined $self->pending->{ $exception };
-            
+
             # Check if the exception should be ignored
             if (!$self->handle('ignore', $exception)) {
                 $self->handle('capture_request', $exception, $controller);
@@ -122,7 +122,7 @@ sub hook_on_message {
 
             # This exception is already pending
             return if defined $self->pending->{ $exception };
-       
+
             $self->pending->{ $exception } = 1;
 
             # Check if the exception should be ignored
@@ -146,7 +146,7 @@ sub handle {
 
     return $self->custom_handlers->{ $method }->($self, @_)
         if (defined($self->custom_handlers->{ $method }));
-    
+
     return $self->handlers->{ $method }->(@_);
 }
 
@@ -161,7 +161,7 @@ sub capture_request {
     $self->handle('exception_context', $exception);
     $self->handle('user_context', $controller);
     $self->handle('tags_context', $controller);
-    
+
     my $request_context = $self->handle('request_context', $controller);
 
     my $event_id = $self->raven->capture_request($controller->url_for->to_abs, %$request_context, $self->raven->get_context);
@@ -232,6 +232,8 @@ sub exception_context {
 $app->sentry->user_context($controller)
 
 Build the user context from current controller.
+Mojolicious has no user subroutines by default.
+You should either set the user_context when loading the plugin or define a user helper subroutine in your mojolicious app.
 See also L<Sentry::Raven->user_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Euser_context(-%25user_context-)>
 
 =cut
@@ -278,7 +280,7 @@ sub request_context {
 }
 
 =head2 tags_context
-    
+
 $app->sentry->tags_context($controller)
 
 Add some tags to the context.
@@ -295,7 +297,7 @@ sub tags_context {
 }
 
 =head2 ignore
-    
+
 $app->sentry->ignore($exception)
 
 Check if the exception should be ignored.
@@ -309,7 +311,7 @@ sub ignore {
 }
 
 =head2 on_error
-    
+
 $app->sentry->on_error($message, %context)
 
 Handle reporting to Sentry error.
@@ -337,7 +339,7 @@ Mojolicious::Plugin::GetSentry - Sentry client for Mojolicious
 version 1.0
 
 =head1 SYNOPSIS
-    
+
     # Mojolicious with config
     #
     $self->plugin('sentry' => {
@@ -370,7 +372,7 @@ version 1.0
             );
         },
 
-        user_context => {
+        user_context => sub {
             my ($sentry, $controller) = @_;
 
             $sentry->raven->add_context(
@@ -453,7 +455,7 @@ version 1.0
             );
         },
 
-        user_context => {
+        user_context => sub {
             my ($sentry, $controller) = @_;
 
             $sentry->raven->add_context(
