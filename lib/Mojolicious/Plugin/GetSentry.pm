@@ -232,6 +232,8 @@ sub exception_context {
 $app->sentry->user_context($controller)
 
 Build the user context from current controller.
+Mojolicious has no user subroutines by default.
+You should either set the user_context when loading the plugin or define a user helper subroutine in your mojolicious app.
 See also L<Sentry::Raven->user_context|https://metacpan.org/pod/Sentry::Raven#Sentry::Raven-%3Euser_context(-%25user_context-)>
 
 =cut
